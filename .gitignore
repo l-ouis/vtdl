@@ -1,0 +1,13 @@
+/target
+/Cargo.lock
+*.sqlite
+*.sqlite-journal
+*.db
+.env
+
+# frontend
+node_modules/
+dist/
+
+# tauri
+src-tauri/gen/

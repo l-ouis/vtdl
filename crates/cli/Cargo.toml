@@ -1,0 +1,18 @@
+[package]
+name = "vtdl-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "vtdl-cli"
+path = "src/main.rs"
+
+[dependencies]
+shared.workspace = true
+vtdl-core.workspace = true
+anyhow.workspace = true
+base64.workspace = true
+
+clap = { version = "4", features = ["derive"] }
+rpassword = "7"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }

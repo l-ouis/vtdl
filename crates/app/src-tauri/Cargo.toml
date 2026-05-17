@@ -1,0 +1,29 @@
+[package]
+name = "vtdl"
+version.workspace = true
+edition.workspace = true
+description = "Encrypted markdown notepad, synced across your devices"
+
+[[bin]]
+name = "vtdl"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+shared.workspace = true
+vtdl-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio = { version = "1", features = ["full"] }
+
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2"
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-window-state = "2"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+base64.workspace = true

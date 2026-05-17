@@ -1,0 +1,452 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>vtdl</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="scroll-area">
+      <div id="today-date" class="note-date" data-tauri-drag-region>
+        <span id="today-date-text"></span>
+        <div id="tab-bar" hidden></div>
+      </div>
+      <div id="editor"></div>
+      <div id="history"></div>
+    </div>
+    <div id="status-bar">
+      <span id="sync-status">starting…</span>
+      <div class="status-right">
+        <span id="todo-count"></span>
+        <button id="history-btn" title="Toggle history" aria-label="Toggle history">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <path d="M8 1.5a6.5 6.5 0 1 1 0 13 6.5 6.5 0 0 1 0-13zm0 1.5a5 5 0 1 0 0 10 5 5 0 0 0 0-10z"/>
+            <path d="M7.25 4h1.5v4.31l3 1.73-.75 1.3-3.75-2.16z"/>
+          </svg>
+        </button>
+        <button id="options-btn" title="Options" aria-label="Options">
+          <svg viewBox="0 0 16 16" width="13" height="13" fill="currentColor" aria-hidden="true">
+            <rect x="1" y="3" width="14" height="1.2" rx="0.6"/>
+            <rect x="1" y="7.4" width="14" height="1.2" rx="0.6"/>
+            <rect x="1" y="11.8" width="14" height="1.2" rx="0.6"/>
+            <circle cx="11" cy="3.6" r="1.6"/>
+            <circle cx="5" cy="8" r="1.6"/>
+            <circle cx="10" cy="12.4" r="1.6"/>
+          </svg>
+        </button>
+        <button id="settings-btn" title="Account & settings" aria-label="Settings">⚙</button>
+      </div>
+    </div>
+
+    <!-- Setup overlay -->
+    <div id="setup-overlay" class="overlay" hidden>
+      <div class="panel">
+        <h2>Welcome to vtdl</h2>
+        <p class="muted">Encrypted notepad, optionally synced across your devices.</p>
+
+        <div id="setup-choose">
+          <label>Sync server URL
+            <div class="ping-row">
+              <input id="setup-server" type="url" placeholder="http://127.0.0.1:8787" />
+              <button id="setup-ping" type="button">Ping</button>
+            </div>
+            <div id="setup-ping-status" class="ping-status"></div>
+          </label>
+
+          <div class="mode-choose">
+            <button class="primary" data-mode="create" disabled>Create new account</button>
+            <button data-mode="join" disabled>Link existing account</button>
+          </div>
+
+          <div class="divider"><span>or</span></div>
+
+          <button id="setup-offline" type="button" class="block">Use offline (no sync)</button>
+        </div>
+
+        <form id="setup-form" hidden>
+          <p class="muted small">Connecting to <code id="setup-form-server"></code></p>
+          <label>Account name
+            <input id="setup-account" type="text" autocomplete="off" required />
+          </label>
+          <label class="join-only" hidden>API token
+            <input id="setup-token" type="text" autocomplete="off" />
+          </label>
+          <label>Passphrase
+            <input id="setup-passphrase" type="password" required />
+          </label>
+          <div class="form-error" id="setup-error"></div>
+          <div class="form-actions">
+            <button type="button" id="setup-back">Back</button>
+            <button type="submit" class="primary" id="setup-submit">Submit</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Settings overlay -->
+    <div id="settings-overlay" class="overlay" hidden>
+      <div class="panel">
+        <h2 id="settings-title">Account</h2>
+
+        <!-- Offline mode -->
+        <div id="settings-offline-panel" hidden>
+          <p class="muted">Working offline. Notes are saved locally only.</p>
+          <div class="form-actions">
+            <button id="settings-close-offline">Close</button>
+            <button id="settings-connect" class="primary">Connect to sync server</button>
+          </div>
+        </div>
+
+        <!-- Configured (synced) -->
+        <div id="settings-account-panel" hidden>
+          <dl class="settings-list">
+            <dt>Server</dt><dd id="settings-server"></dd>
+            <dt>Account</dt><dd id="settings-account"></dd>
+            <dt>API token</dt>
+            <dd>
+              <code id="settings-token"></code>
+              <button id="reveal-token" data-revealed="false" type="button" title="Show/hide token" aria-label="Show/hide token">
+                <svg data-state="open" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                  <circle cx="12" cy="12" r="3"/>
+                </svg>
+                <svg data-state="closed" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                  <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                  <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24"/>
+                  <line x1="1" y1="1" x2="23" y2="23"/>
+                </svg>
+              </button>
+              <button id="copy-token" title="Copy to clipboard">copy</button>
+            </dd>
+          </dl>
+          <div class="form-actions">
+            <button id="settings-close">Close</button>
+            <button id="settings-logout">Sign out</button>
+            <button id="settings-delete" class="danger">Delete account…</button>
+          </div>
+          <div id="settings-delete-confirm" hidden>
+            <hr />
+            <p class="muted">Type the account name to permanently delete it from the server.</p>
+            <input id="settings-delete-input" type="text" placeholder="account name" />
+            <div class="form-error" id="settings-delete-error"></div>
+            <div class="form-actions">
+              <button id="settings-delete-cancel">Cancel</button>
+              <button id="settings-delete-go" class="danger" disabled>Delete permanently</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Sign-out confirmation overlay -->
+    <div id="signout-overlay" class="overlay" hidden>
+      <div class="panel">
+        <h2>Sign out</h2>
+        <p class="muted">
+          Sign out of this device? Your notes remain on the server but will be wiped locally.
+        </p>
+        <div class="form-error" id="settings-signout-error"></div>
+        <div class="form-actions">
+          <button id="settings-signout-cancel">Cancel</button>
+          <button id="settings-signout-go" class="danger">Sign out</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Options overlay -->
+    <div id="options-overlay" class="overlay" hidden>
+      <div class="panel">
+        <div class="panel-titlebar">
+          <h2>Options</h2>
+          <button id="options-close" class="panel-close" type="button" aria-label="Close">×</button>
+        </div>
+        <div class="panel-content">
+
+        <h3 class="section-heading">Color</h3>
+
+        <div class="option-row">
+          <span class="option-label">Background color</span>
+          <div class="option-control">
+            <input id="options-bg" type="text" placeholder="#f7e9b0" autocomplete="off" />
+            <span id="options-bg-swatch" class="color-swatch"></span>
+            <button id="options-bg-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Text color</span>
+          <div class="option-control">
+            <input id="options-fg" type="text" placeholder="#000000" autocomplete="off" />
+            <span id="options-fg-swatch" class="color-swatch"></span>
+            <button id="options-fg-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Accent color</span>
+          <div class="option-control">
+            <input id="options-accent" type="text" placeholder="#c89028" autocomplete="off" />
+            <span id="options-accent-swatch" class="color-swatch"></span>
+            <button id="options-accent-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <h3 class="section-heading">Typing</h3>
+
+        <div class="option-row">
+          <span class="option-label">Caret style</span>
+          <div class="option-control caret-style-picker">
+            <label class="caret-pick" title="I-beam">
+              <input type="radio" name="caret-style" value="bar" />
+              <span class="caret-shape caret-shape-bar"></span>
+            </label>
+            <label class="caret-pick" title="Underscore">
+              <input type="radio" name="caret-style" value="underscore" />
+              <span class="caret-shape caret-shape-underscore"></span>
+            </label>
+            <label class="caret-pick" title="Block">
+              <input type="radio" name="caret-style" value="block" />
+              <span class="caret-shape caret-shape-block"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Blink caret</span>
+          <input id="options-caret-blink" type="checkbox" class="option-toggle" />
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Hide first space after checkbox</span>
+          <input id="options-hide-space" type="checkbox" class="option-toggle" />
+        </div>
+
+        <h3 class="section-heading">Columns</h3>
+
+        <div class="option-row">
+          <span class="option-label">Columns view</span>
+          <input id="options-columns" type="checkbox" class="option-toggle" />
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Column width (px)</span>
+          <div class="option-control">
+            <input id="options-column-width" type="number" min="100" max="1200" step="10" />
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Toggle columns view shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-columns" type="button">Ctrl+Shift+C</button>
+            <button id="options-shortcut-columns-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Widen column shortcut</span>
+          <div class="option-control">
+            <button id="options-col-inc" type="button">Ctrl+Shift+=</button>
+            <button id="options-col-inc-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Narrow column shortcut</span>
+          <div class="option-control">
+            <button id="options-col-dec" type="button">Ctrl+Shift+-</button>
+            <button id="options-col-dec-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <h3 class="section-heading">Tabs</h3>
+
+        <p class="small muted" style="margin: 4px 0 8px;">
+          The hidden <code>`newtab`</code> tag ends a tab; the next line starts a new one.
+        </p>
+
+        <div class="option-row">
+          <span class="option-label">Tab navigation</span>
+          <input id="options-tabs-enabled" type="checkbox" class="option-toggle" />
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Toggle tab navigation shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tabs-toggle" type="button">Ctrl+Shift+H</button>
+            <button id="options-shortcut-tabs-toggle-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Next tab shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-next" type="button">Ctrl+Shift+]</button>
+            <button id="options-shortcut-tab-next-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Previous tab shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-prev" type="button">Ctrl+Shift+[</button>
+            <button id="options-shortcut-tab-prev-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Tab 1 shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-1" type="button">Ctrl+1</button>
+            <button id="options-shortcut-tab-1-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Tab 2 shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-2" type="button">Ctrl+2</button>
+            <button id="options-shortcut-tab-2-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Tab 3 shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-3" type="button">Ctrl+3</button>
+            <button id="options-shortcut-tab-3-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Tab 4 shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-4" type="button">Ctrl+4</button>
+            <button id="options-shortcut-tab-4-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Tab 5 shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-tab-5" type="button">Ctrl+5</button>
+            <button id="options-shortcut-tab-5-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <h3 class="section-heading">Keybinds</h3>
+
+        <div class="option-row">
+          <span class="option-label">Global show/hide shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut" type="button">Click to record</button>
+            <button id="options-shortcut-clear" type="button">Clear</button>
+            <button id="options-shortcut-help" type="button" class="help-btn" title="OS compatibility info">?</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Check current line shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-check-line" type="button">Ctrl+Space</button>
+            <button id="options-shortcut-check-line-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Toggle history shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-history" type="button">Ctrl+H</button>
+            <button id="options-shortcut-history-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Open options shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-options" type="button">Ctrl+O</button>
+            <button id="options-shortcut-options-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Open account modal shortcut</span>
+          <div class="option-control">
+            <button id="options-shortcut-settings" type="button">Ctrl+P</button>
+            <button id="options-shortcut-settings-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Soft-close shortcut (hide window)</span>
+          <div class="option-control">
+            <button id="options-soft-close" type="button">Ctrl+W</button>
+            <button id="options-soft-close-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Hard-quit shortcut (exit process)</span>
+          <div class="option-control">
+            <button id="options-hard-quit" type="button">Ctrl+Q</button>
+            <button id="options-hard-quit-reset" type="button">Reset</button>
+          </div>
+        </div>
+
+        <h3 class="section-heading">Tags</h3>
+        <p class="small muted tag-help-intro">Inline code blocks in your notes:</p>
+        <dl class="tag-help-list">
+          <dt><code>persist</code></dt>
+          <dd>Entire group is carried across days.</dd>
+          <dt><code>expiry:n</code></dt>
+          <dd>Auto-stamps checked lines in the group with <code>expires:n</code>.</dd>
+          <dt><code>expires:n</code></dt>
+          <dd>Hidden: decrements daily and disappears at 0.</dd>
+          <dt><code>repeat:n,r</code></dt>
+          <dd>Hidden: auto-unchecks <code>n</code> days after being checked.</dd>
+          <dt><code>newtab</code></dt>
+          <dd>Hidden: ends a tab; always persists across days.</dd>
+        </dl>
+        </div>
+      </div>
+    </div>
+
+    <!-- Shortcut compatibility help overlay -->
+    <div id="shortcut-help-overlay" class="overlay" hidden>
+      <div class="panel">
+        <h2>Global shortcut compatibility</h2>
+
+        <h3 class="section-heading">Windows · macOS · Linux X11</h3>
+        <p>Just record a keycombo, untested though.</p>
+
+        <h3 class="section-heading">Linux Wayland</h3>
+        <p>Bind your shortcut in <em>Settings → Keyboard → Custom Shortcuts</em>
+        to:</p>
+        <p><code>/path/to/vtdl --toggle</code></p>
+        <p>vtdl is single-instance, so the same command launches it on first
+        call and toggles show/hide on later calls. To keep the toggle
+        reliable, dismiss the window with soft-close rather than minimizing.</p>
+
+        <div class="form-actions">
+          <button id="shortcut-help-close" class="primary">Close</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Window-edge resize handles. decorations: false means the OS doesn't
+         provide resize edges; these invisible strips set the proper resize
+         cursor on hover and call startResizeDragging on mousedown. -->
+    <div class="resize-handle resize-n"  data-resize="North"></div>
+    <div class="resize-handle resize-s"  data-resize="South"></div>
+    <div class="resize-handle resize-w"  data-resize="West"></div>
+    <div class="resize-handle resize-e"  data-resize="East"></div>
+    <div class="resize-handle resize-nw" data-resize="NorthWest"></div>
+    <div class="resize-handle resize-ne" data-resize="NorthEast"></div>
+    <div class="resize-handle resize-sw" data-resize="SouthWest"></div>
+    <div class="resize-handle resize-se" data-resize="SouthEast"></div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

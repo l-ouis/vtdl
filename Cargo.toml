@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/shared",
+    "crates/server",
+    "crates/core",
+    "crates/cli",
+    "crates/app/src-tauri",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.80"
+license = "MIT"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+thiserror = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+tokio = { version = "1", features = ["full"] }
+base64 = "0.22"
+
+shared = { path = "crates/shared" }
+vtdl-core = { path = "crates/core" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
