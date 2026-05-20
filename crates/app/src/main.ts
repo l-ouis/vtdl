@@ -51,8 +51,12 @@ const CARET_STYLE_KEY = "vtdl-caret-style";
 const CARET_BLINK_KEY = "vtdl-caret-blink";
 type CaretStyle = "bar" | "underscore" | "block";
 const DEFAULT_CARET_STYLE: CaretStyle = "bar";
-const COLUMNS_MODE_KEY = "vtdl-columns-mode";
 const COLUMN_WIDTH_KEY = "vtdl-column-width";
+// Per-tab columns state (mode on/off + width) lives in localStorage as a JSON
+// array indexed by tab position. Visual-only — not part of the note text.
+const TAB_PREFS_KEY = "vtdl-tab-prefs";
+// Default columns mode for newly-created tabs.
+const COLUMNS_MODE_KEY = "vtdl-columns-mode";
 const HISTORY_HIDDEN_KEY = "vtdl-history-hidden";
 const GLOBAL_SHORTCUT_KEY = "vtdl-global-shortcut";
 const SOFT_CLOSE_KEY = "vtdl-soft-close-shortcut";
@@ -89,10 +93,19 @@ const NEWTAB_LINE_RE = /`\s*newtab\s*`/;
 interface TabSection {
   contentLines: string[];
 }
+/** Per-tab visual prefs (not stored in note text — kept in localStorage so
+ *  the layout is a UI concern, not part of the encrypted notebook). */
+interface TabPrefs {
+  mode: boolean;
+  width: number;
+}
 const COL_WIDTH_STEP = 10;
 const DEFAULT_COLUMN_WIDTH = 280;
 const MIN_COLUMN_WIDTH = 100;
 const MAX_COLUMN_WIDTH = 1200;
+function clampColumnWidth(n: number): number {
+  return Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, n));
+}
 const HEX_RE = /^#?([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
 
 /** Normalize "fff" / "#fff" / "FFFFFF" → "#ffffff" (lowercased, leading #).
@@ -232,8 +245,12 @@ let setupMode: "create" | "join" = "create";
 let hideFirstSpaceFlag = false;
 let caretStyle: CaretStyle = DEFAULT_CARET_STYLE;
 let caretBlink = true;
-let columnsMode = false;
-let columnWidth = DEFAULT_COLUMN_WIDTH;
+// Default columns mode + width for newly-created tabs (and the seed value
+// used to populate tab prefs the first time a tab is encountered).
+let defaultColumnsMode = false;
+let defaultColumnWidth = DEFAULT_COLUMN_WIDTH;
+// Per-tab visual overrides (mode + width), aligned to `tabSections` by index.
+let tabPrefs: TabPrefs[] = [];
 let historyHidden = false;
 let currentShortcut: string | null = null;
 let recordingShortcut = false;
@@ -455,7 +472,7 @@ function recomposeColumns(): string {
 function createColumnView(initial: string, container: HTMLElement): EditorView {
   const wrap = document.createElement("div");
   wrap.className = "column";
-  wrap.style.width = `${columnWidth}px`;
+  wrap.style.width = `${currentTabPrefs().width}px`;
   container.appendChild(wrap);
   return new EditorView({
     parent: wrap,
@@ -522,7 +539,7 @@ function findColumnAndOffset(
  *  (new H1 typed, existing H1 deleted, headers reordered). Preserves the
  *  user's cursor by absolute offset in the recomposed text. */
 function maybeResplit(text: string) {
-  if (!columnsMode) return;
+  if (!currentTabPrefs().mode) return;
   const newSections = splitByH1(text);
   let changed = newSections.length !== columnViews.length;
   if (!changed) {
@@ -706,7 +723,7 @@ function renderTabBar() {
  *  re-mount see the user's latest edits. */
 function captureActiveTab() {
   if (tabSections.length === 0) return;
-  const editorText = columnsMode && columnViews.length > 0
+  const editorText = currentTabPrefs().mode && columnViews.length > 0
     ? recomposeColumns()
     : (todayView?.state.doc.toString() ?? "");
   tabSections[activeTabIndex].contentLines = editorText.split("\n");
@@ -728,8 +745,9 @@ function mountActiveEditor() {
   // while `loadAndMountEditor` was awaiting `load_notebook`) might have
   // already mounted. Tear down first so we don't stack two editors.
   destroyMainEditor();
+  ensureTabPrefsSize();
   const text = activeTabText();
-  if (columnsMode) {
+  if (currentTabPrefs().mode) {
     mountColumns(text);
   } else {
     todayView = createTodayView(text);
@@ -899,16 +917,16 @@ async function setCaretBlink(v: boolean) {
   }
 }
 
-function loadColumnsMode(): boolean {
+function loadDefaultColumnsMode(): boolean {
   try { return localStorage.getItem(COLUMNS_MODE_KEY) === "1"; } catch { return false; }
 }
-function saveColumnsMode(v: boolean) {
+function saveDefaultColumnsMode(v: boolean) {
   try {
     if (v) localStorage.setItem(COLUMNS_MODE_KEY, "1");
     else localStorage.removeItem(COLUMNS_MODE_KEY);
   } catch {}
 }
-function loadColumnWidth(): number {
+function loadDefaultColumnWidth(): number {
   try {
     const raw = localStorage.getItem(COLUMN_WIDTH_KEY);
     if (raw) {
@@ -918,16 +936,78 @@ function loadColumnWidth(): number {
   } catch {}
   return DEFAULT_COLUMN_WIDTH;
 }
-function saveColumnWidth(n: number) {
+function saveDefaultColumnWidth(n: number) {
   try { localStorage.setItem(COLUMN_WIDTH_KEY, String(n)); } catch {}
 }
 
-async function setColumnsMode(v: boolean) {
-  columnsMode = v;
-  saveColumnsMode(v);
-  if (appMode === "setup") return;
-  destroyEditor();
-  await loadAndMountEditor();
+// ---------- per-tab prefs ----------
+
+function loadTabPrefs(): TabPrefs[] {
+  try {
+    const raw = localStorage.getItem(TAB_PREFS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((p) => ({
+        mode: !!p?.mode,
+        width: Number.isFinite(p?.width) ? clampColumnWidth(p.width) : defaultColumnWidth,
+      }));
+  } catch { return []; }
+}
+function saveTabPrefs() {
+  try { localStorage.setItem(TAB_PREFS_KEY, JSON.stringify(tabPrefs)); } catch {}
+}
+
+/** Pad / trim `tabPrefs` so it matches the current `tabSections` length.
+ *  New slots inherit the user's current defaults. */
+function ensureTabPrefsSize() {
+  while (tabPrefs.length < tabSections.length) {
+    tabPrefs.push({ mode: defaultColumnsMode, width: defaultColumnWidth });
+  }
+  if (tabPrefs.length > tabSections.length) {
+    tabPrefs.length = tabSections.length;
+    saveTabPrefs();
+  }
+}
+
+function currentTabPrefs(): TabPrefs {
+  ensureTabPrefsSize();
+  // ensureTabPrefsSize guarantees the slot exists for any in-range index.
+  return tabPrefs[activeTabIndex] ?? { mode: defaultColumnsMode, width: defaultColumnWidth };
+}
+
+/** Toggle the active tab's columns mode and re-mount the editor. */
+async function toggleActiveTabColumns() {
+  captureActiveTab();
+  ensureTabPrefsSize();
+  tabPrefs[activeTabIndex].mode = !tabPrefs[activeTabIndex].mode;
+  saveTabPrefs();
+  destroyMainEditor();
+  mountActiveEditor();
+}
+
+/** Adjust the active tab's column width. Applied live to wraps when columns
+ *  are showing; persisted regardless. */
+function setActiveTabColumnWidth(px: number) {
+  ensureTabPrefsSize();
+  px = clampColumnWidth(px);
+  tabPrefs[activeTabIndex].width = px;
+  saveTabPrefs();
+  for (const v of columnViews) {
+    const wrap = v.dom.parentElement;
+    if (wrap) wrap.style.width = `${px}px`;
+    v.requestMeasure();
+  }
+}
+
+async function setDefaultColumnsMode(v: boolean) {
+  defaultColumnsMode = v;
+  saveDefaultColumnsMode(v);
+}
+function setDefaultColumnWidth(px: number) {
+  defaultColumnWidth = clampColumnWidth(px);
+  saveDefaultColumnWidth(defaultColumnWidth);
 }
 
 function loadHistoryHidden(): boolean {
@@ -1261,17 +1341,6 @@ function checkCurrentLine() {
   toggleLineCheckbox(view, line.number);
 }
 
-function setColumnWidth(px: number) {
-  px = Math.max(MIN_COLUMN_WIDTH, Math.min(MAX_COLUMN_WIDTH, px));
-  columnWidth = px;
-  saveColumnWidth(px);
-  for (const v of columnViews) {
-    const wrap = v.dom.parentElement;
-    if (wrap) wrap.style.width = `${px}px`;
-    v.requestMeasure();
-  }
-}
-
 function showOptions() {
   const bg = loadColor(BG_COLOR_KEY);
   const fg = loadColor(FG_COLOR_KEY);
@@ -1288,8 +1357,8 @@ function showOptions() {
   optionsHideSpace.checked = hideFirstSpaceFlag;
   for (const r of optionsCaretStyleRadios) r.checked = r.value === caretStyle;
   optionsCaretBlink.checked = caretBlink;
-  optionsColumns.checked = columnsMode;
-  optionsColumnWidth.value = String(columnWidth);
+  optionsColumns.checked = defaultColumnsMode;
+  optionsColumnWidth.value = String(defaultColumnWidth);
   optionsTabsEnabled.checked = tabsEnabled;
   optionsOverlay.hidden = false;
 }
@@ -1606,13 +1675,13 @@ function wireOptionsEvents() {
     void setCaretBlink(optionsCaretBlink.checked);
   });
   optionsColumns.addEventListener("change", () => {
-    void setColumnsMode(optionsColumns.checked);
+    void setDefaultColumnsMode(optionsColumns.checked);
   });
   optionsColumnWidth.addEventListener("change", () => {
     const n = parseInt(optionsColumnWidth.value, 10);
     if (Number.isFinite(n)) {
-      setColumnWidth(n);
-      optionsColumnWidth.value = String(columnWidth); // reflect clamping
+      setDefaultColumnWidth(n);
+      optionsColumnWidth.value = String(defaultColumnWidth); // reflect clamping
     }
   });
   optionsShortcut.addEventListener("click", startRecordingShortcut);
@@ -1726,8 +1795,9 @@ async function main() {
   caretStyle = loadCaretStyle();
   caretBlink = loadCaretBlink();
   applyCaretStyle(caretStyle);
-  columnsMode = loadColumnsMode();
-  columnWidth = loadColumnWidth();
+  defaultColumnsMode = loadDefaultColumnsMode();
+  defaultColumnWidth = loadDefaultColumnWidth();
+  tabPrefs = loadTabPrefs();
   historyHidden = loadHistoryHidden();
   applyHistoryVisibility();
   historyBtn.addEventListener("click", toggleHistory);
@@ -1823,14 +1893,18 @@ async function main() {
       getCurrentWindow().close();
       return;
     }
-    if (columnsMode && matchesShortcut(e, colIncShortcut)) {
-      e.preventDefault();
-      setColumnWidth(columnWidth + COL_WIDTH_STEP);
+    if (matchesShortcut(e, colIncShortcut)) {
+      if (currentTabPrefs().mode) {
+        e.preventDefault();
+        setActiveTabColumnWidth(currentTabPrefs().width + COL_WIDTH_STEP);
+      }
       return;
     }
-    if (columnsMode && matchesShortcut(e, colDecShortcut)) {
-      e.preventDefault();
-      setColumnWidth(columnWidth - COL_WIDTH_STEP);
+    if (matchesShortcut(e, colDecShortcut)) {
+      if (currentTabPrefs().mode) {
+        e.preventDefault();
+        setActiveTabColumnWidth(currentTabPrefs().width - COL_WIDTH_STEP);
+      }
       return;
     }
     if (matchesShortcut(e, historyShortcut)) {
@@ -1855,9 +1929,7 @@ async function main() {
     }
     if (matchesShortcut(e, columnsToggleShortcut)) {
       e.preventDefault();
-      const next = !columnsMode;
-      optionsColumns.checked = next;
-      void setColumnsMode(next);
+      void toggleActiveTabColumns();
       return;
     }
     if (matchesShortcut(e, tabsToggleShortcut)) {
