@@ -69,6 +69,12 @@ impl Client {
         }
     }
 
+    /// The server's current snapshot version — used to force-overwrite the
+    /// server with local content (push with this as `expected_version`).
+    pub async fn server_version(&self) -> Result<i64> {
+        Ok(self.get_snapshot().await?.version)
+    }
+
     pub async fn delete_account(&self) -> Result<()> {
         let url = format!(
             "{}/accounts/{}",

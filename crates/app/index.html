@@ -137,6 +137,30 @@
             </div>
           </div>
         </div>
+
+        <!-- Snapshots & backup (shown in both offline and synced modes) -->
+        <div id="settings-backup-panel" hidden>
+          <hr />
+          <h3 class="section-heading">Snapshots &amp; backup</h3>
+          <p class="small muted">
+            Snapshots are saved on this device. They are not affected by signing out.
+          </p>
+          <div class="backup-row">
+            <input id="snapshot-label" type="text" placeholder="Snapshot label (optional)" autocomplete="off" />
+            <button id="snapshot-save" class="primary">Save snapshot</button>
+          </div>
+          <div class="form-error" id="backup-error"></div>
+          <div class="form-note" id="backup-note"></div>
+          <ul id="snapshot-list" class="snapshot-list"></ul>
+          <div class="backup-actions">
+            <button id="backup-export">Export to file…</button>
+            <button id="backup-import">Import from file…</button>
+          </div>
+          <div id="backup-server-actions" class="backup-actions" hidden>
+            <button id="backup-pull">Load from server (replace local)</button>
+            <button id="backup-push">Push local to server (overwrite)</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -145,7 +169,8 @@
       <div class="panel">
         <h2>Sign out</h2>
         <p class="muted">
-          Sign out of this device? Your notes remain on the server but will be wiped locally.
+          Sign out of this device? You'll switch to offline mode — your notes
+          stay on this device and on the server.
         </p>
         <div class="form-error" id="settings-signout-error"></div>
         <div class="form-actions">
@@ -269,12 +294,18 @@
         <h3 class="section-heading">Tabs</h3>
 
         <p class="small muted" style="margin: 4px 0 8px;">
-          The hidden <code>`newtab`</code> tag ends a tab; the next line starts a new one.
+          The hidden <code>`newtab`</code> tag starts a new tab; it shows at the
+          top of that tab.
         </p>
 
         <div class="option-row">
           <span class="option-label">Tab navigation</span>
           <input id="options-tabs-enabled" type="checkbox" class="option-toggle" />
+        </div>
+
+        <div class="option-row">
+          <span class="option-label">Hide newtab marker on tabs with content</span>
+          <input id="options-hide-newtab" type="checkbox" class="option-toggle" />
         </div>
 
         <div class="option-row">
@@ -412,7 +443,7 @@
           <dt><code>repeat:n,r</code></dt>
           <dd>Hidden: auto-unchecks <code>n</code> days after being checked.</dd>
           <dt><code>newtab</code></dt>
-          <dd>Hidden: ends a tab; always persists across days.</dd>
+          <dd>Hidden: starts a new tab; always persists across days.</dd>
         </dl>
         </div>
       </div>

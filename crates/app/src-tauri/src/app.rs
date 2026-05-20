@@ -7,9 +7,13 @@ use chrono::{Duration as CDuration, Local};
 use serde::{Deserialize, Serialize};
 use shared::{carry_forward, crypto, DailyEntry, Notebook, RegisterRequest, SyncSnapshot};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use vtdl_core::{cache, config::Config, keystore, sync::PushOutcome, Client};
+use vtdl_core::{
+    cache, config::Config, keystore, snapshot, snapshot::Snapshot, snapshot::SnapshotMeta,
+    sync::PushOutcome, Client,
+};
 
 #[derive(Clone, Serialize)]
 struct NotebookView {
@@ -262,6 +266,265 @@ fn trim_notebook_for_push(nb: &Notebook, days: u32) -> Notebook {
     trimmed
 }
 
+// ---------- snapshots & backup ----------
+
+/// Portable on-disk export format (distinct from internal snapshot files).
+#[derive(Serialize, Deserialize)]
+struct ExportFile {
+    vtdl_export: u32,
+    exported_at: String,
+    version: i64,
+    notebook: Notebook,
+}
+
+fn notebook_is_empty(nb: &Notebook) -> bool {
+    nb.today.trim().is_empty() && nb.history.is_empty()
+}
+
+fn build_snapshot(label: String, auto: bool, version: i64, nb: &Notebook) -> Snapshot {
+    let now = Local::now();
+    Snapshot {
+        meta: SnapshotMeta {
+            id: now.format("%Y%m%d-%H%M%S-%3f").to_string(),
+            label,
+            created_at: now.to_rfc3339(),
+            today_date: nb.today_date.clone(),
+            auto,
+        },
+        version,
+        notebook: nb.clone(),
+    }
+}
+
+/// Take a best-effort safety snapshot before a destructive action. No-op when
+/// the notebook is empty so we don't accumulate empty snapshots.
+async fn auto_snapshot(inner: &Arc<Mutex<Inner>>, reason: &str) {
+    let (version, nb) = {
+        let g = inner.lock().await;
+        (g.version, g.notebook.clone())
+    };
+    if notebook_is_empty(&nb) {
+        return;
+    }
+    let _ = snapshot::save(&build_snapshot(reason.to_string(), true, version, &nb));
+}
+
+fn parse_imported(data: &[u8]) -> Result<Notebook> {
+    if let Ok(ef) = serde_json::from_slice::<ExportFile>(data) {
+        return Ok(ef.notebook);
+    }
+    Notebook::from_bytes(data).context("parse imported notebook")
+}
+
+/// Resolve a `FilePath` from the dialog plugin to a plain filesystem path.
+fn dialog_path(fp: tauri_plugin_dialog::FilePath) -> Option<String> {
+    fp.into_path().ok().map(|p| p.to_string_lossy().to_string())
+}
+
+async fn pick_save_path(app: &AppHandle, default_name: &str) -> Option<String> {
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
+        .file()
+        .set_file_name(default_name)
+        .add_filter("JSON", &["json"])
+        .save_file(move |p| {
+            let _ = tx.send(p);
+        });
+    rx.await.ok().flatten().and_then(dialog_path)
+}
+
+async fn pick_open_path(app: &AppHandle) -> Option<String> {
+    let (tx, rx) = oneshot::channel();
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .pick_file(move |p| {
+            let _ = tx.send(p);
+        });
+    rx.await.ok().flatten().and_then(dialog_path)
+}
+
+/// Replace the local notebook (snapshot restore / import). Rolls the incoming
+/// notebook forward to today, persists, and notifies the UI. `force_push`
+/// clears `last_pushed` so the new content propagates on the next sync.
+async fn apply_local_notebook(
+    app: &AppHandle,
+    state: &State<'_, AppState>,
+    mut nb: Notebook,
+) -> NotebookView {
+    let _ = rollover(&mut nb);
+    let view = {
+        let mut g = state.inner.lock().await;
+        g.notebook = nb.clone();
+        g.last_pushed = None; // force the restored content to push next sync
+        let _ = cache::save(&cache::Cache {
+            version: g.version,
+            notebook: g.notebook.clone(),
+        });
+        NotebookView::from(g.version, &g.notebook)
+    };
+    let _ = state.tx.send(Msg::Save);
+    let _ = app.emit("notebook-updated", view.clone());
+    view
+}
+
+#[tauri::command]
+async fn create_snapshot(
+    label: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<SnapshotMeta, String> {
+    let (version, nb) = {
+        let g = state.inner.lock().await;
+        (g.version, g.notebook.clone())
+    };
+    let label = label
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("Snapshot {}", Local::now().format("%Y-%m-%d %H:%M")));
+    let snap = build_snapshot(label, false, version, &nb);
+    snapshot::save(&snap).map_err(|e| e.to_string())?;
+    Ok(snap.meta)
+}
+
+#[tauri::command]
+async fn list_snapshots() -> Result<Vec<SnapshotMeta>, String> {
+    snapshot::list().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_snapshot(id: String) -> Result<(), String> {
+    snapshot::delete(&id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn restore_snapshot(
+    id: String,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<NotebookView, String> {
+    let snap = snapshot::load(&id).map_err(|e| e.to_string())?;
+    auto_snapshot(&state.inner, "Before restore").await;
+    Ok(apply_local_notebook(&app, &state, snap.notebook).await)
+}
+
+#[tauri::command]
+async fn export_notebook(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<String>, String> {
+    let (version, nb) = {
+        let g = state.inner.lock().await;
+        (g.version, g.notebook.clone())
+    };
+    let default_name = format!("vtdl-backup-{}.json", Local::now().format("%Y-%m-%d"));
+    let Some(path) = pick_save_path(&app, &default_name).await else {
+        return Ok(None);
+    };
+    let export = ExportFile {
+        vtdl_export: 1,
+        exported_at: Local::now().to_rfc3339(),
+        version,
+        notebook: nb,
+    };
+    let data = serde_json::to_vec_pretty(&export).map_err(|e| e.to_string())?;
+    std::fs::write(&path, data).map_err(|e| e.to_string())?;
+    Ok(Some(path))
+}
+
+#[tauri::command]
+async fn import_notebook(
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<Option<NotebookView>, String> {
+    let Some(path) = pick_open_path(&app).await else {
+        return Ok(None);
+    };
+    let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let nb = parse_imported(&data).map_err(|e| e.to_string())?;
+    auto_snapshot(&state.inner, "Before import").await;
+    Ok(Some(apply_local_notebook(&app, &state, nb).await))
+}
+
+/// Force-overwrite the local notebook with the current server state.
+#[tauri::command]
+async fn pull_replace(app: AppHandle, state: State<'_, AppState>) -> Result<NotebookView, String> {
+    let client = {
+        let g = state.inner.lock().await;
+        match &g.client {
+            Some(c) => unsafe_clone_client(c, &g.cfg).map_err(|e| e.to_string())?,
+            None => return Err("not connected to a sync server".into()),
+        }
+    };
+    let (version, nb) = client.pull().await.map_err(|e| e.to_string())?;
+    auto_snapshot(&state.inner, "Before load from server").await;
+    let mut nb = nb;
+    let _ = rollover(&mut nb);
+    let view = {
+        let mut g = state.inner.lock().await;
+        g.version = version;
+        g.notebook = nb.clone();
+        g.last_pushed = Some(nb.clone());
+        let _ = cache::save(&cache::Cache {
+            version,
+            notebook: nb.clone(),
+        });
+        NotebookView::from(version, &nb)
+    };
+    let _ = app.emit("notebook-updated", view.clone());
+    let _ = app.emit("sync-status", SyncStatus::Synced { version });
+    Ok(view)
+}
+
+/// Force-overwrite the server with the current local notebook.
+#[tauri::command]
+async fn push_overwrite(state: State<'_, AppState>) -> Result<i64, String> {
+    let (client, nb, days) = {
+        let g = state.inner.lock().await;
+        match &g.client {
+            Some(c) => (
+                unsafe_clone_client(c, &g.cfg).map_err(|e| e.to_string())?,
+                g.notebook.clone(),
+                g.history_days,
+            ),
+            None => return Err("not connected to a sync server".into()),
+        }
+    };
+    let to_push = trim_notebook_for_push(&nb, days);
+    let mut last_err = String::new();
+    for _ in 0..3 {
+        let v = match client.server_version().await {
+            Ok(v) => v,
+            Err(e) => {
+                last_err = e.to_string();
+                break;
+            }
+        };
+        match client.push(&to_push, v).await {
+            Ok(PushOutcome::Ok { version }) => {
+                let mut g = state.inner.lock().await;
+                g.version = version;
+                g.last_pushed = Some(to_push.clone());
+                let _ = cache::save(&cache::Cache {
+                    version,
+                    notebook: nb.clone(),
+                });
+                return Ok(version);
+            }
+            // Someone else wrote in between — retry against the fresh version.
+            Ok(PushOutcome::Conflict { .. }) => continue,
+            Err(e) => {
+                last_err = e.to_string();
+                break;
+            }
+        }
+    }
+    Err(if last_err.is_empty() {
+        "server state kept changing; try again".into()
+    } else {
+        last_err
+    })
+}
+
 #[tauri::command]
 async fn setup_status(state: State<'_, AppState>) -> Result<SetupStatus, String> {
     let guard = state.inner.lock().await;
@@ -342,6 +605,9 @@ async fn join_account(
             return Err("already configured; sign out first".into());
         }
     }
+    // Joining pulls the account's state and overwrites local notes — snapshot
+    // first so anything currently on this device is recoverable.
+    auto_snapshot(&state.inner, "Before linking account").await;
     let result = do_join(args, &state).await.map_err(|e| e.to_string())?;
     refresh_history_days(&state).await;
     Ok(result)
@@ -349,7 +615,9 @@ async fn join_account(
 
 #[tauri::command]
 async fn logout(state: State<'_, AppState>) -> Result<(), String> {
-    do_logout(&state).await.map_err(|e| e.to_string())
+    // Disconnect but KEEP local notes — the user drops into offline mode with
+    // their notebook intact. A safety snapshot is taken inside do_logout.
+    do_logout(&state, false).await.map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -364,7 +632,8 @@ async fn delete_account(state: State<'_, AppState>) -> Result<(), String> {
     if let Some(c) = client {
         c.delete_account().await.map_err(|e| e.to_string())?;
     }
-    do_logout(&state).await.map_err(|e| e.to_string())
+    // Account is gone from the server — wipe the local copy too.
+    do_logout(&state, true).await.map_err(|e| e.to_string())
 }
 
 /// `Client` isn't Clone (it holds an http client + key). For commands that
@@ -480,21 +749,46 @@ async fn do_join(args: JoinArgs, state: &State<'_, AppState>) -> Result<SetupSta
     })
 }
 
-async fn do_logout(state: &State<'_, AppState>) -> Result<()> {
+/// Disconnect from the sync server. When `wipe_local` is false the local
+/// notebook is preserved (the app drops into offline mode) — this is the
+/// default for sign-out so notes are never lost. `wipe_local` is only true for
+/// account deletion. A safety snapshot is taken first either way.
+async fn do_logout(state: &State<'_, AppState>, wipe_local: bool) -> Result<()> {
+    auto_snapshot(
+        &state.inner,
+        if wipe_local {
+            "Before account deletion"
+        } else {
+            "Before sign out"
+        },
+    )
+    .await;
     let account = {
         let mut guard = state.inner.lock().await;
         guard.client = None;
         let acc = guard.cfg.take().map(|c| c.account_id);
-        guard.notebook = Notebook::default();
-        guard.version = 0;
         guard.last_pushed = None;
+        guard.version = 0;
+        guard.history_days = 0;
+        if wipe_local {
+            guard.notebook = Notebook::default();
+        }
         acc
     };
     if let Some(acc) = account {
         let _ = off_runtime(move || keystore::delete_key(&acc)).await;
     }
     let _ = Config::delete();
-    let _ = cache::delete();
+    if wipe_local {
+        let _ = cache::delete();
+    } else {
+        // Persist the kept notebook, now disconnected (version reset to 0).
+        let guard = state.inner.lock().await;
+        let _ = cache::save(&cache::Cache {
+            version: 0,
+            notebook: guard.notebook.clone(),
+        });
+    }
     Ok(())
 }
 
@@ -549,6 +843,7 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -575,6 +870,14 @@ pub fn run() {
             delete_account,
             register_global_shortcut,
             unregister_global_shortcut,
+            create_snapshot,
+            list_snapshots,
+            delete_snapshot,
+            restore_snapshot,
+            export_notebook,
+            import_notebook,
+            pull_replace,
+            push_overwrite,
         ])
         .setup(move |app| {
             let handle = app.handle().clone();

@@ -1,4 +1,4 @@
-import { EditorSelection, Extension, Line, Range, SelectionRange } from "@codemirror/state";
+import { EditorSelection, EditorState, Extension, Line, Range, SelectionRange, StateField } from "@codemirror/state";
 import {
   Decoration,
   DecorationSet,
@@ -31,6 +31,7 @@ const KNOWN_TAGS: Record<string, TagSpec> = {
 };
 
 const EXPIRY_RE = /`\s*expiry\s*:\s*(\d+)\s*`/;
+const NEWTAB_TAG_RE = /`\s*newtab\s*`/g;
 const EXPIRES_TAG_RE = /\s*`\s*expires\s*:\s*\d+\s*`/g;
 // Matches both `repeat:N` (bare) and `repeat:N,R`; captures N.
 const REPEAT_TAG_RE = /`\s*repeat\s*:\s*(\d+)(?:\s*,\s*\d+)?\s*`/g;
@@ -271,9 +272,11 @@ function buildDecorations(
   view: EditorView,
   readOnly: boolean,
   hideFirstSpace: boolean,
+  hideNewtabWithContent: boolean,
 ): DecorationSet {
   const ranges: Range<Decoration>[] = [];
   const doc = view.state.doc;
+
   // Only treat selection ranges as "live" when the editor is focused (and not
   // read-only). Otherwise the default position-0 cursor would unfold any span
   // starting at position 0 even before the user clicks in.
@@ -319,6 +322,25 @@ function buildDecorations(
         if (tag) {
           const focused = touches(node.from, node.to, sel);
           if (tag.spec.hidden && !focused) {
+            if (tag.name === "newtab" && hideNewtabWithContent) {
+              const line = doc.lineAt(node.from);
+              const onlyMarker = line.text.replace(NEWTAB_TAG_RE, "").trim() === "";
+              if (onlyMarker && line.number < doc.lines) {
+                // Lone marker with a line after it → the newtabFold StateField
+                // removes the whole line (including its newline). Emit nothing
+                // here so we don't overlap that replace decoration.
+                return false;
+              }
+              if (!onlyMarker) {
+                // Inline with other text → drop just the marker (+ one space).
+                let from = node.from;
+                if (from > 0 && doc.sliceString(from - 1, from) === " ") from -= 1;
+                ranges.push(HIDE.range(from, node.to));
+                return false;
+              }
+              // Lone marker on the last line → a truly empty tab; fall through
+              // to the diamond so the tab stays discoverable.
+            }
             ranges.push(
               Decoration.replace({
                 widget: new TagMarkerWidget(inner.trim()),
@@ -436,19 +458,65 @@ function buildDecorations(
   return Decoration.set(ranges, true);
 }
 
+const NEWTAB_LINE_ONLY_RE = /`\s*newtab\s*`/;
+
+/** A line containing only a `newtab` marker (the marker plus whitespace). */
+function isNewtabOnlyLine(text: string): boolean {
+  return (
+    NEWTAB_LINE_ONLY_RE.test(text) && text.replace(NEWTAB_TAG_RE, "").trim() === ""
+  );
+}
+
+/** True when line `n` is a lone `newtab` marker that has another line after it
+ *  — i.e. the tab has moved past the marker, so it should be folded away. */
+function isFoldableNewtabLine(state: EditorState, n: number): boolean {
+  if (n >= state.doc.lines) return false; // last line → empty tab, keep diamond
+  return isNewtabOnlyLine(state.doc.line(n).text);
+}
+
+const NEWTAB_FOLD = Decoration.replace({});
+
+/** Compute fold ranges for every foldable `newtab` line. Each range spans the
+ *  marker line *and its trailing newline* so the line is removed from layout
+ *  entirely (no blank gap). Replacing a line break is only permitted from a
+ *  StateField — not a ViewPlugin — which is why this lives in its own field. */
+function computeNewtabFolds(state: EditorState): DecorationSet {
+  const ranges: Range<Decoration>[] = [];
+  for (let i = 1; i < state.doc.lines; i++) {
+    if (!isFoldableNewtabLine(state, i)) continue;
+    const line = state.doc.line(i);
+    ranges.push(NEWTAB_FOLD.range(line.from, line.to + 1));
+  }
+  return Decoration.set(ranges, true);
+}
+
+/** StateField that folds away lone `newtab` marker lines, plus an atomic-range
+ *  provider so the caret skips the folded region cleanly (and Backspace at the
+ *  start of the following line removes the whole marker, merging tabs). */
+function newtabFold(): Extension {
+  const field = StateField.define<DecorationSet>({
+    create: (state) => computeNewtabFolds(state),
+    update: (deco, tr) => (tr.docChanged ? computeNewtabFolds(tr.state) : deco),
+    provide: (f) => EditorView.decorations.from(f),
+  });
+  return [field, EditorView.atomicRanges.of((view) => view.state.field(field))];
+}
+
 export interface LivePreviewOpts {
   readOnly?: boolean;
   hideFirstSpace?: boolean;
+  hideNewtabWithContent?: boolean;
 }
 
 export function livePreview(opts: LivePreviewOpts = {}): Extension {
   const readOnly = opts.readOnly ?? false;
   const hideFirstSpace = opts.hideFirstSpace ?? false;
-  return ViewPlugin.fromClass(
+  const hideNewtabWithContent = opts.hideNewtabWithContent ?? false;
+  const main = ViewPlugin.fromClass(
     class {
       decorations: DecorationSet;
       constructor(view: EditorView) {
-        this.decorations = buildDecorations(view, readOnly, hideFirstSpace);
+        this.decorations = buildDecorations(view, readOnly, hideFirstSpace, hideNewtabWithContent);
       }
       update(update: ViewUpdate) {
         if (
@@ -457,10 +525,11 @@ export function livePreview(opts: LivePreviewOpts = {}): Extension {
           update.selectionSet ||
           update.focusChanged
         ) {
-          this.decorations = buildDecorations(update.view, readOnly, hideFirstSpace);
+          this.decorations = buildDecorations(update.view, readOnly, hideFirstSpace, hideNewtabWithContent);
         }
       }
     },
     { decorations: (v) => v.decorations },
   );
+  return hideNewtabWithContent ? [main, newtabFold()] : main;
 }

@@ -470,6 +470,67 @@ body {
 }
 .settings-list dd { margin: 2px 0 0; }
 
+/* Settings panel can grow tall with snapshots — cap height and scroll. */
+#settings-overlay .panel {
+  max-height: 82vh;
+  overflow-y: auto;
+}
+
+/* Snapshots & backup */
+#settings-backup-panel hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 18px 0 12px;
+}
+.backup-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.backup-row input { flex: 1; min-width: 0; }
+.backup-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.form-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 8px;
+  min-height: 1em;
+  word-wrap: break-word;
+}
+.snapshot-list {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.snapshot-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+.snapshot-info { display: flex; flex-direction: column; min-width: 0; }
+.snapshot-name {
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.snapshot-when { margin-top: 1px; }
+.snapshot-item-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.snapshot-empty { padding: 8px 0; }
+button.armed {
+  border-color: var(--error);
+  color: var(--error);
+}
+
 #settings-delete-confirm hr {
   border: none;
   border-top: 1px solid var(--border);

@@ -57,6 +57,9 @@ const COLUMN_WIDTH_KEY = "vtdl-column-width";
 const TAB_PREFS_KEY = "vtdl-tab-prefs";
 // Default columns mode for newly-created tabs.
 const COLUMNS_MODE_KEY = "vtdl-columns-mode";
+// When set, the `newtab` diamond is hidden on tabs that already have other
+// content (only shown on otherwise-empty tabs). Default on.
+const HIDE_NEWTAB_KEY = "vtdl-hide-newtab-with-content";
 const HISTORY_HIDDEN_KEY = "vtdl-history-hidden";
 const GLOBAL_SHORTCUT_KEY = "vtdl-global-shortcut";
 const SOFT_CLOSE_KEY = "vtdl-soft-close-shortcut";
@@ -187,6 +190,7 @@ const optionsCheckLineShortcutReset = $("options-shortcut-check-line-reset") as 
 const optionsColumnsToggleShortcut = $("options-shortcut-columns") as HTMLButtonElement;
 const optionsColumnsToggleShortcutReset = $("options-shortcut-columns-reset") as HTMLButtonElement;
 const optionsTabsEnabled = $("options-tabs-enabled") as HTMLInputElement;
+const optionsHideNewtab = $("options-hide-newtab") as HTMLInputElement;
 const optionsTabsToggleShortcut = $("options-shortcut-tabs-toggle") as HTMLButtonElement;
 const optionsTabsToggleShortcutReset = $("options-shortcut-tabs-toggle-reset") as HTMLButtonElement;
 const optionsTabShortcuts = [1, 2, 3, 4, 5].map(
@@ -228,6 +232,27 @@ const settingsDeleteError = $("settings-delete-error");
 const copyTokenBtn = $("copy-token");
 const revealTokenBtn = $("reveal-token") as HTMLButtonElement;
 
+// Snapshots & backup
+const settingsBackupPanel = $("settings-backup-panel");
+const snapshotLabel = $("snapshot-label") as HTMLInputElement;
+const snapshotSave = $("snapshot-save") as HTMLButtonElement;
+const snapshotList = $("snapshot-list");
+const backupError = $("backup-error");
+const backupNote = $("backup-note");
+const backupExport = $("backup-export") as HTMLButtonElement;
+const backupImport = $("backup-import") as HTMLButtonElement;
+const backupServerActions = $("backup-server-actions");
+const backupPull = $("backup-pull") as HTMLButtonElement;
+const backupPush = $("backup-push") as HTMLButtonElement;
+
+type SnapshotMeta = {
+  id: string;
+  label: string;
+  created_at: string;
+  today_date: string;
+  auto: boolean;
+};
+
 const TOKEN_MASK = "••••••••••••••••";
 let tokenRevealed = false;
 
@@ -251,6 +276,7 @@ let defaultColumnsMode = false;
 let defaultColumnWidth = DEFAULT_COLUMN_WIDTH;
 // Per-tab visual overrides (mode + width), aligned to `tabSections` by index.
 let tabPrefs: TabPrefs[] = [];
+let hideNewtabWithContent = true;
 let historyHidden = false;
 let currentShortcut: string | null = null;
 let recordingShortcut = false;
@@ -428,7 +454,7 @@ function createTodayView(initial: string): EditorView {
         drawSelection({ cursorBlinkRate: caretBlink ? 1200 : 0 }),
         highlightActiveLine(),
         markdown({ base: markdownLanguage, extensions: [GFM] }),
-        livePreview({ hideFirstSpace: hideFirstSpaceFlag }),
+        livePreview({ hideFirstSpace: hideFirstSpaceFlag, hideNewtabWithContent }),
         baseTheme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !suppressSave) {
@@ -460,7 +486,19 @@ function splitByH1(text: string): string[] {
     }
   }
   sections.push(buf.join("\n"));
-  if (sections.length > 1 && sections[0].trim() === "") sections.shift();
+  if (sections.length > 1) {
+    const first = sections[0];
+    const firstLines = first.split("\n");
+    if (first.trim() === "") {
+      sections.shift();
+    } else if (firstLines.every((l) => l.trim() === "" || NEWTAB_LINE_RE.test(l))) {
+      // Pre-H1 section is only a `newtab` marker — fold it into the first real
+      // column so it doesn't occupy a skinny column of its own. (Round-trips:
+      // recomposeColumns rejoins with "\n", preserving line order.)
+      sections[1] = first + "\n" + sections[1];
+      sections.shift();
+    }
+  }
   if (sections.length === 0) sections.push("");
   return sections;
 }
@@ -485,7 +523,7 @@ function createColumnView(initial: string, container: HTMLElement): EditorView {
         drawSelection({ cursorBlinkRate: caretBlink ? 1200 : 0 }),
         highlightActiveLine(),
         markdown({ base: markdownLanguage, extensions: [GFM] }),
-        livePreview({ hideFirstSpace: hideFirstSpaceFlag }),
+        livePreview({ hideFirstSpace: hideFirstSpaceFlag, hideNewtabWithContent }),
         baseTheme,
         EditorView.updateListener.of((update) => {
           if (update.docChanged && !suppressSave) {
@@ -596,7 +634,7 @@ function createHistoryView(text: string, container: HTMLElement): EditorView {
         EditorView.editable.of(false),
         EditorView.lineWrapping,
         markdown({ base: markdownLanguage, extensions: [GFM] }),
-        livePreview({ readOnly: true, hideFirstSpace: hideFirstSpaceFlag }),
+        livePreview({ readOnly: true, hideFirstSpace: hideFirstSpaceFlag, hideNewtabWithContent }),
         baseTheme,
       ],
     }),
@@ -662,17 +700,24 @@ function applyFontSize(px: number) {
 
 // ---------- tabs ----------
 
-/** A line containing the `newtab` tag ends a tab — it stays in the current
- *  tab's contentLines (so the diamond marker renders at the end of the tab)
- *  and the next line starts a new tab. */
+/** A line containing the `newtab` tag *begins* a new tab — it becomes the
+ *  first line of the next tab's contentLines (so the marker renders at the
+ *  top of the new tab, and the previous tab ends cleanly on its own content,
+ *  making it easy to append more columns there). */
 function parseTabs(text: string): TabSection[] {
   const lines = text.split("\n");
   const sections: TabSection[] = [{ contentLines: [] }];
   for (const line of lines) {
-    sections[sections.length - 1].contentLines.push(line);
     if (NEWTAB_LINE_RE.test(line)) {
-      sections.push({ contentLines: [] });
+      sections.push({ contentLines: [line] });
+    } else {
+      sections[sections.length - 1].contentLines.push(line);
     }
+  }
+  // A leading `newtab` (text starts with the marker) leaves an empty tab 0;
+  // drop it so the marker simply heads the first real tab.
+  if (sections.length > 1 && sections[0].contentLines.length === 0) {
+    sections.shift();
   }
   return sections;
 }
@@ -975,6 +1020,27 @@ function currentTabPrefs(): TabPrefs {
   ensureTabPrefsSize();
   // ensureTabPrefsSize guarantees the slot exists for any in-range index.
   return tabPrefs[activeTabIndex] ?? { mode: defaultColumnsMode, width: defaultColumnWidth };
+}
+
+function loadHideNewtabWithContent(): boolean {
+  // Default on; only an explicit "0" disables it.
+  try { return localStorage.getItem(HIDE_NEWTAB_KEY) !== "0"; } catch { return true; }
+}
+function saveHideNewtabWithContent(v: boolean) {
+  try {
+    if (v) localStorage.removeItem(HIDE_NEWTAB_KEY);
+    else localStorage.setItem(HIDE_NEWTAB_KEY, "0");
+  } catch {}
+}
+async function setHideNewtabWithContent(v: boolean) {
+  if (hideNewtabWithContent === v) return;
+  hideNewtabWithContent = v;
+  saveHideNewtabWithContent(v);
+  // Re-mount the live editor so the new livePreview option takes effect.
+  if (appMode === "setup") return;
+  captureActiveTab();
+  destroyMainEditor();
+  mountActiveEditor();
 }
 
 /** Toggle the active tab's columns mode and re-mount the editor. */
@@ -1360,6 +1426,7 @@ function showOptions() {
   optionsColumns.checked = defaultColumnsMode;
   optionsColumnWidth.value = String(defaultColumnWidth);
   optionsTabsEnabled.checked = tabsEnabled;
+  optionsHideNewtab.checked = hideNewtabWithContent;
   optionsOverlay.hidden = false;
 }
 
@@ -1540,10 +1607,185 @@ function showSettings() {
     // shouldn't happen — settings button hidden during setup
     return;
   }
+  // Snapshots & backup are local — shown in both modes. Force pull/push only
+  // make sense when connected to a server.
+  settingsBackupPanel.hidden = false;
+  backupServerActions.hidden = appMode !== "configured";
+  backupError.textContent = "";
+  backupNote.textContent = "";
+  void refreshSnapshotList();
   settingsOverlay.hidden = false;
 }
 
 function hideSettings() { settingsOverlay.hidden = true; }
+
+// ---------- snapshots & backup ----------
+
+function setBackupNote(msg: string) {
+  backupError.textContent = "";
+  backupNote.textContent = msg;
+}
+function setBackupError(msg: string) {
+  backupNote.textContent = "";
+  backupError.textContent = msg;
+}
+
+/** Two-click confirm for destructive actions (avoids modal/confirm()): the
+ *  first click arms the button for 3s; a second click within that window
+ *  fires `action`. */
+function armButton(btn: HTMLButtonElement, armedLabel: string, action: () => void) {
+  if (btn.dataset.armed === "1") {
+    btn.dataset.armed = "";
+    btn.classList.remove("armed");
+    btn.textContent = btn.dataset.label ?? btn.textContent;
+    action();
+    return;
+  }
+  btn.dataset.label = btn.textContent ?? "";
+  btn.dataset.armed = "1";
+  btn.classList.add("armed");
+  btn.textContent = armedLabel;
+  window.setTimeout(() => {
+    if (btn.dataset.armed === "1") {
+      btn.dataset.armed = "";
+      btn.classList.remove("armed");
+      btn.textContent = btn.dataset.label ?? "";
+    }
+  }, 3000);
+}
+
+function formatSnapshotDate(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+function renderSnapshots(metas: SnapshotMeta[]) {
+  snapshotList.innerHTML = "";
+  if (metas.length === 0) {
+    const li = document.createElement("li");
+    li.className = "snapshot-empty small muted";
+    li.textContent = "No snapshots yet.";
+    snapshotList.appendChild(li);
+    return;
+  }
+  for (const m of metas) {
+    const li = document.createElement("li");
+    li.className = "snapshot-item";
+    const info = document.createElement("div");
+    info.className = "snapshot-info";
+    const name = document.createElement("span");
+    name.className = "snapshot-name";
+    name.textContent = m.auto ? `${m.label} (auto)` : m.label;
+    const when = document.createElement("span");
+    when.className = "snapshot-when small muted";
+    when.textContent = formatSnapshotDate(m.created_at);
+    info.appendChild(name);
+    info.appendChild(when);
+
+    const actions = document.createElement("div");
+    actions.className = "snapshot-item-actions";
+    const restoreBtn = document.createElement("button");
+    restoreBtn.type = "button";
+    restoreBtn.textContent = "Restore";
+    restoreBtn.addEventListener("click", () =>
+      armButton(restoreBtn, "Confirm", () => void restoreSnapshot(m.id)),
+    );
+    const delBtn = document.createElement("button");
+    delBtn.type = "button";
+    delBtn.className = "danger";
+    delBtn.textContent = "Delete";
+    delBtn.addEventListener("click", () =>
+      armButton(delBtn, "Confirm", () => void deleteSnapshotById(m.id)),
+    );
+    actions.appendChild(restoreBtn);
+    actions.appendChild(delBtn);
+
+    li.appendChild(info);
+    li.appendChild(actions);
+    snapshotList.appendChild(li);
+  }
+}
+
+async function refreshSnapshotList() {
+  try {
+    renderSnapshots(await invoke<SnapshotMeta[]>("list_snapshots"));
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function saveSnapshot() {
+  try {
+    const meta = await invoke<SnapshotMeta>("create_snapshot", {
+      label: snapshotLabel.value.trim() || null,
+    });
+    snapshotLabel.value = "";
+    setBackupNote(`Saved "${meta.label}".`);
+    await refreshSnapshotList();
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function restoreSnapshot(id: string) {
+  try {
+    await invoke("restore_snapshot", { id });
+    setBackupNote("Restored. A snapshot of your previous notes was saved first.");
+    await refreshSnapshotList();
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function deleteSnapshotById(id: string) {
+  try {
+    await invoke("delete_snapshot", { id });
+    await refreshSnapshotList();
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function exportNotebook() {
+  try {
+    const path = await invoke<string | null>("export_notebook");
+    if (path) setBackupNote(`Exported to ${path}`);
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function importNotebook() {
+  try {
+    const view = await invoke<NotebookView | null>("import_notebook");
+    if (view) {
+      setBackupNote("Imported. A snapshot of your previous notes was saved first.");
+      await refreshSnapshotList();
+    }
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function pullReplace() {
+  try {
+    await invoke("pull_replace");
+    setBackupNote("Loaded from server. A snapshot of your previous notes was saved first.");
+    await refreshSnapshotList();
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
+
+async function pushOverwrite() {
+  try {
+    const version = await invoke<number>("push_overwrite");
+    setBackupNote(`Pushed local notes to server (version ${version}).`);
+  } catch (e) {
+    setBackupError(String(e));
+  }
+}
 
 function showSignOutConfirm() {
   settingsSignoutError.textContent = "";
@@ -1566,13 +1808,16 @@ async function performSignOut() {
     settingsSignoutGo.disabled = false;
     return;
   }
+  // Keep notes: drop into offline mode rather than the setup screen. The
+  // backend preserves the local notebook on sign-out.
   currentStatus = { configured: false, server_url: null, account_id: null, api_token: null };
-  setOfflineFlag(false);
-  appMode = "setup";
-  destroyEditor();
+  setOfflineFlag(true);
+  appMode = "offline";
   hideSignOutConfirm();
   hideSettings();
-  showSetup();
+  destroyEditor();
+  await loadAndMountEditor();
+  setStatus({ kind: "idle" });
 }
 
 async function deleteAccount() {
@@ -1734,6 +1979,9 @@ function wireOptionsEvents() {
     // Only toggle if state actually differs (avoid re-running for sync-on-open).
     if (optionsTabsEnabled.checked !== tabsEnabled) void toggleTabs();
   });
+  optionsHideNewtab.addEventListener("change", () => {
+    void setHideNewtabWithContent(optionsHideNewtab.checked);
+  });
   optionsTabsToggleShortcut.addEventListener("click", () =>
     recordInAppShortcut(optionsTabsToggleShortcut, setTabsToggleShortcut),
   );
@@ -1768,6 +2016,16 @@ function wireSettingsEvents() {
   copyTokenBtn.addEventListener("click", copyToken);
   revealTokenBtn.addEventListener("click", () => setTokenRevealed(!tokenRevealed));
 
+  snapshotSave.addEventListener("click", () => void saveSnapshot());
+  backupExport.addEventListener("click", () => void exportNotebook());
+  backupImport.addEventListener("click", () => void importNotebook());
+  backupPull.addEventListener("click", () =>
+    armButton(backupPull, "Confirm: replace local", () => void pullReplace()),
+  );
+  backupPush.addEventListener("click", () =>
+    armButton(backupPush, "Confirm: overwrite server", () => void pushOverwrite()),
+  );
+
   settingsDelete.addEventListener("click", () => {
     settingsDeleteConfirm.hidden = false;
     settingsDeleteInput.focus();
@@ -1798,6 +2056,7 @@ async function main() {
   defaultColumnsMode = loadDefaultColumnsMode();
   defaultColumnWidth = loadDefaultColumnWidth();
   tabPrefs = loadTabPrefs();
+  hideNewtabWithContent = loadHideNewtabWithContent();
   historyHidden = loadHistoryHidden();
   applyHistoryVisibility();
   historyBtn.addEventListener("click", toggleHistory);
