@@ -24,7 +24,7 @@ tokio = { version = "1", features = ["full"] }
 base64 = "0.22"
 
 shared = { path = "crates/shared" }
-vtdl-core = { path = "crates/core" }
+rune-core = { path = "crates/core" }
 
 [profile.release]
 lto = "thin"

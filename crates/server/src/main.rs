@@ -16,21 +16,21 @@ use subtle::ConstantTimeEq;
 use tower_http::trace::TraceLayer;
 
 #[derive(Parser, Debug)]
-#[command(name = "vtdl-server")]
+#[command(name = "rune-server")]
 struct Args {
     /// Bind address.
-    #[arg(long, env = "VTDL_BIND", default_value = "127.0.0.1:8787")]
+    #[arg(long, env = "RUNE_BIND", default_value = "127.0.0.1:8787")]
     bind: SocketAddr,
     /// SQLite database file.
-    #[arg(long, env = "VTDL_DB", default_value = "vtdl.sqlite")]
+    #[arg(long, env = "RUNE_DB", default_value = "rune.sqlite")]
     db: String,
     /// Max number of history days each account may sync. 0 = unlimited.
     /// Clients honor this voluntarily — server cannot decrypt to enforce.
-    #[arg(long, env = "VTDL_HISTORY_DAYS", default_value_t = 0)]
+    #[arg(long, env = "RUNE_HISTORY_DAYS", default_value_t = 0)]
     history_days: u32,
     /// Whether new account registration is accepted. Existing accounts can
     /// always sync regardless.
-    #[arg(long, env = "VTDL_ALLOW_REGISTRATION", default_value_t = true)]
+    #[arg(long, env = "RUNE_ALLOW_REGISTRATION", default_value_t = true)]
     allow_registration: bool,
 }
 
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "vtdl_server=info,tower_http=info".into()),
+                .unwrap_or_else(|_| "rune_server=info,tower_http=info".into()),
         )
         .init();
 
@@ -84,7 +84,7 @@ struct ServerInfo {
 
 async fn healthz(State(st): State<AppState>) -> Json<ServerInfo> {
     Json(ServerInfo {
-        service: "vtdl",
+        service: "rune",
         version: env!("CARGO_PKG_VERSION"),
         history_days: st.history_days,
         allow_registration: st.allow_registration,

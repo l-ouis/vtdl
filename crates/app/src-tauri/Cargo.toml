@@ -1,11 +1,11 @@
 [package]
-name = "vtdl"
+name = "rune"
 version.workspace = true
 edition.workspace = true
 description = "Encrypted markdown notepad, synced across your devices"
 
 [[bin]]
-name = "vtdl"
+name = "rune"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -13,7 +13,7 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 shared.workspace = true
-vtdl-core.workspace = true
+rune-core.workspace = true
 anyhow.workspace = true
 serde.workspace = true
 serde_json.workspace = true

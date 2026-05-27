@@ -42,41 +42,41 @@ type ServerInfo = {
 };
 type AppMode = "setup" | "configured" | "offline";
 
-const OFFLINE_KEY = "vtdl-offline-mode";
-const BG_COLOR_KEY = "vtdl-bg-color";
-const FG_COLOR_KEY = "vtdl-fg-color";
-const ACCENT_COLOR_KEY = "vtdl-accent-color";
-const HIDE_FIRST_SPACE_KEY = "vtdl-hide-first-space";
-const CARET_STYLE_KEY = "vtdl-caret-style";
-const CARET_BLINK_KEY = "vtdl-caret-blink";
+const OFFLINE_KEY = "rune-offline-mode";
+const BG_COLOR_KEY = "rune-bg-color";
+const FG_COLOR_KEY = "rune-fg-color";
+const ACCENT_COLOR_KEY = "rune-accent-color";
+const HIDE_FIRST_SPACE_KEY = "rune-hide-first-space";
+const CARET_STYLE_KEY = "rune-caret-style";
+const CARET_BLINK_KEY = "rune-caret-blink";
 type CaretStyle = "bar" | "underscore" | "block";
 const DEFAULT_CARET_STYLE: CaretStyle = "bar";
-const COLUMN_WIDTH_KEY = "vtdl-column-width";
+const COLUMN_WIDTH_KEY = "rune-column-width";
 // Per-tab columns state (mode on/off + width) lives in localStorage as a JSON
 // array indexed by tab position. Visual-only — not part of the note text.
-const TAB_PREFS_KEY = "vtdl-tab-prefs";
+const TAB_PREFS_KEY = "rune-tab-prefs";
 // Default columns mode for newly-created tabs.
-const COLUMNS_MODE_KEY = "vtdl-columns-mode";
+const COLUMNS_MODE_KEY = "rune-columns-mode";
 // When set, the `newtab` diamond is hidden on tabs that already have other
 // content (only shown on otherwise-empty tabs). Default on.
-const HIDE_NEWTAB_KEY = "vtdl-hide-newtab-with-content";
-const HISTORY_HIDDEN_KEY = "vtdl-history-hidden";
-const GLOBAL_SHORTCUT_KEY = "vtdl-global-shortcut";
-const SOFT_CLOSE_KEY = "vtdl-soft-close-shortcut";
-const HARD_QUIT_KEY = "vtdl-hard-quit-shortcut";
-const COL_INC_KEY = "vtdl-col-inc-shortcut";
-const COL_DEC_KEY = "vtdl-col-dec-shortcut";
-const HISTORY_SHORTCUT_KEY = "vtdl-history-shortcut";
-const OPTIONS_SHORTCUT_KEY = "vtdl-options-shortcut";
-const SETTINGS_SHORTCUT_KEY = "vtdl-settings-shortcut";
-const CHECK_LINE_SHORTCUT_KEY = "vtdl-check-line-shortcut";
-const COLUMNS_TOGGLE_SHORTCUT_KEY = "vtdl-columns-toggle-shortcut";
-const TABS_ENABLED_KEY = "vtdl-tabs-enabled";
-const ACTIVE_TAB_KEY = "vtdl-active-tab";
-const TABS_TOGGLE_SHORTCUT_KEY = "vtdl-tabs-toggle-shortcut";
-const TAB_SHORTCUT_KEYS = [1, 2, 3, 4, 5].map(i => `vtdl-tab-${i}-shortcut`);
-const TAB_NEXT_SHORTCUT_KEY = "vtdl-tab-next-shortcut";
-const TAB_PREV_SHORTCUT_KEY = "vtdl-tab-prev-shortcut";
+const HIDE_NEWTAB_KEY = "rune-hide-newtab-with-content";
+const HISTORY_HIDDEN_KEY = "rune-history-hidden";
+const GLOBAL_SHORTCUT_KEY = "rune-global-shortcut";
+const SOFT_CLOSE_KEY = "rune-soft-close-shortcut";
+const HARD_QUIT_KEY = "rune-hard-quit-shortcut";
+const COL_INC_KEY = "rune-col-inc-shortcut";
+const COL_DEC_KEY = "rune-col-dec-shortcut";
+const HISTORY_SHORTCUT_KEY = "rune-history-shortcut";
+const OPTIONS_SHORTCUT_KEY = "rune-options-shortcut";
+const SETTINGS_SHORTCUT_KEY = "rune-settings-shortcut";
+const CHECK_LINE_SHORTCUT_KEY = "rune-check-line-shortcut";
+const COLUMNS_TOGGLE_SHORTCUT_KEY = "rune-columns-toggle-shortcut";
+const TABS_ENABLED_KEY = "rune-tabs-enabled";
+const ACTIVE_TAB_KEY = "rune-active-tab";
+const TABS_TOGGLE_SHORTCUT_KEY = "rune-tabs-toggle-shortcut";
+const TAB_SHORTCUT_KEYS = [1, 2, 3, 4, 5].map(i => `rune-tab-${i}-shortcut`);
+const TAB_NEXT_SHORTCUT_KEY = "rune-tab-next-shortcut";
+const TAB_PREV_SHORTCUT_KEY = "rune-tab-prev-shortcut";
 const DEFAULT_SOFT_CLOSE = "Ctrl+W";
 const DEFAULT_HARD_QUIT = "Ctrl+Q";
 const DEFAULT_COL_INC = "Ctrl+Shift+=";
@@ -676,7 +676,7 @@ function formatDate(d: Date): string {
 const DEFAULT_FONT_SIZE = 15;
 const MIN_FONT_SIZE = 9;
 const MAX_FONT_SIZE = 36;
-const FONT_STORAGE_KEY = "vtdl-font-size";
+const FONT_STORAGE_KEY = "rune-font-size";
 let fontSize = DEFAULT_FONT_SIZE;
 
 function loadFontSize(): number {
@@ -1502,7 +1502,7 @@ async function pingServer() {
     pingVerifiedUrl = url.replace(/\/+$/, "");
     pingAllowRegistration = info.allow_registration ?? true;
     pingHistoryDays = info.history_days ?? 0;
-    const parts = [`✓ vtdl server v${info.version}`];
+    const parts = [`✓ rune server v${info.version}`];
     if (pingHistoryDays > 0) parts.push(`history limit: ${pingHistoryDays}d`);
     if (!pingAllowRegistration) parts.push("registration paused");
     setupPingStatus.textContent = parts.join(" · ");

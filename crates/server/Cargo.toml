@@ -1,10 +1,10 @@
 [package]
-name = "vtdl-server"
+name = "rune-server"
 version.workspace = true
 edition.workspace = true
 
 [[bin]]
-name = "vtdl-server"
+name = "rune-server"
 path = "src/main.rs"
 
 [dependencies]

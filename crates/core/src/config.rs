@@ -15,7 +15,7 @@ pub struct Config {
 
 impl Config {
     pub fn path() -> Result<PathBuf> {
-        let dirs = ProjectDirs::from("dev", "vtdl", "vtdl")
+        let dirs = ProjectDirs::from("dev", "rune", "rune")
             .ok_or_else(|| anyhow!("cannot resolve config dir"))?;
         Ok(dirs.config_dir().join("config.toml"))
     }

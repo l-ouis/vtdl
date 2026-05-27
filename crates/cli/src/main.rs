@@ -2,10 +2,10 @@ use anyhow::{anyhow, bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use clap::{Parser, Subcommand};
 use shared::{crypto, RegisterRequest};
-use vtdl_core::{cache, config::Config, keystore};
+use rune_core::{cache, config::Config, keystore};
 
 #[derive(Parser, Debug)]
-#[command(name = "vtdl-cli", about = "Set up vtdl on this device")]
+#[command(name = "rune-cli", about = "Set up rune on this device")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -58,7 +58,7 @@ fn prompt_passphrase(confirm: bool) -> Result<String> {
 
 fn cmd_init(server: String, account: String) -> Result<()> {
     if Config::exists()? {
-        bail!("config already exists; use `vtdl-cli logout` first");
+        bail!("config already exists; use `rune-cli logout` first");
     }
     let pass = prompt_passphrase(true)?;
     let api_token = crypto::random_token();
@@ -96,7 +96,7 @@ fn cmd_init(server: String, account: String) -> Result<()> {
 
 fn cmd_join(server: String, account: String, token: String) -> Result<()> {
     if Config::exists()? {
-        bail!("config already exists; use `vtdl-cli logout` first");
+        bail!("config already exists; use `rune-cli logout` first");
     }
     let pass = prompt_passphrase(false)?;
     let client = reqwest::blocking::Client::new();

@@ -3,7 +3,7 @@ use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use keyring::Entry;
 use shared::crypto::Key;
 
-const SERVICE: &str = "dev.vtdl.vtdl";
+const SERVICE: &str = "dev.rune.rune";
 
 fn entry(account: &str) -> Result<Entry> {
     Entry::new(SERVICE, account).context("open keyring entry")

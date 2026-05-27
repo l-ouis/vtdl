@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tokio::sync::{mpsc, oneshot, Mutex};
-use vtdl_core::{
+use rune_core::{
     cache, config::Config, keystore, snapshot, snapshot::Snapshot, snapshot::SnapshotMeta,
     sync::PushOutcome, Client,
 };
@@ -162,11 +162,11 @@ async fn register_global_shortcut(
     let _ = gs.unregister_all();
     match gs.register(shortcut.as_str()) {
         Ok(_) => {
-            eprintln!("[vtdl] registered global shortcut: {shortcut}");
+            eprintln!("[rune] registered global shortcut: {shortcut}");
             Ok(())
         }
         Err(e) => {
-            eprintln!("[vtdl] failed to register {shortcut}: {e}");
+            eprintln!("[rune] failed to register {shortcut}: {e}");
             Err(e.to_string())
         }
     }
@@ -174,17 +174,17 @@ async fn register_global_shortcut(
 
 #[tauri::command]
 async fn unregister_global_shortcut(app: AppHandle) -> Result<(), String> {
-    eprintln!("[vtdl] unregistering all global shortcuts");
+    eprintln!("[rune] unregistering all global shortcuts");
     app.global_shortcut().unregister_all().map_err(|e| e.to_string())
 }
 
 fn toggle_main_window(app: &AppHandle) {
     let Some(win) = app.get_webview_window("main") else {
-        eprintln!("[vtdl] toggle: no 'main' window found");
+        eprintln!("[rune] toggle: no 'main' window found");
         return;
     };
     let visible = win.is_visible().unwrap_or(true);
-    eprintln!("[vtdl] toggle: visible={visible}");
+    eprintln!("[rune] toggle: visible={visible}");
     // Simple semantics: visible → hide, hidden → show.
     //
     // On Wayland, programmatic focus-stealing of an already-visible window is
@@ -194,12 +194,12 @@ fn toggle_main_window(app: &AppHandle) {
     // as a brand-new window appearance and gives focus to.
     if visible {
         if let Err(e) = win.hide() {
-            eprintln!("[vtdl] hide failed: {e}");
+            eprintln!("[rune] hide failed: {e}");
         }
     } else {
         let _ = win.unminimize();
         if let Err(e) = win.show() {
-            eprintln!("[vtdl] show failed: {e}");
+            eprintln!("[rune] show failed: {e}");
         }
         let _ = win.set_focus();
     }
@@ -226,9 +226,9 @@ async fn fetch_server_info(url: &str) -> Result<ServerInfo, String> {
     let info: ServerInfo = resp
         .json()
         .await
-        .map_err(|_| "not a vtdl server (unexpected response shape)".to_string())?;
-    if info.service != "vtdl" {
-        return Err(format!("not a vtdl server (service={})", info.service));
+        .map_err(|_| "not a rune server (unexpected response shape)".to_string())?;
+    if info.service != "rune" {
+        return Err(format!("not a rune server (service={})", info.service));
     }
     Ok(info)
 }
@@ -271,7 +271,7 @@ fn trim_notebook_for_push(nb: &Notebook, days: u32) -> Notebook {
 /// Portable on-disk export format (distinct from internal snapshot files).
 #[derive(Serialize, Deserialize)]
 struct ExportFile {
-    vtdl_export: u32,
+    rune_export: u32,
     exported_at: String,
     version: i64,
     notebook: Notebook,
@@ -416,12 +416,12 @@ async fn export_notebook(
         let g = state.inner.lock().await;
         (g.version, g.notebook.clone())
     };
-    let default_name = format!("vtdl-backup-{}.json", Local::now().format("%Y-%m-%d"));
+    let default_name = format!("rune-backup-{}.json", Local::now().format("%Y-%m-%d"));
     let Some(path) = pick_save_path(&app, &default_name).await else {
         return Ok(None);
     };
     let export = ExportFile {
-        vtdl_export: 1,
+        rune_export: 1,
         exported_at: Local::now().to_rfc3339(),
         version,
         notebook: nb,
@@ -797,7 +797,7 @@ pub fn run() {
     // window will be a Wayland surface (focus-raising blocked) or XWayland.
     #[cfg(target_os = "linux")]
     eprintln!(
-        "[vtdl] startup: GDK_BACKEND={:?} XDG_SESSION_TYPE={:?}",
+        "[rune] startup: GDK_BACKEND={:?} XDG_SESSION_TYPE={:?}",
         std::env::var("GDK_BACKEND").ok(),
         std::env::var("XDG_SESSION_TYPE").ok(),
     );
@@ -829,7 +829,7 @@ pub fn run() {
         // instance. `--toggle` is our hook for OS-level keyboard shortcuts
         // (esp. Wayland, where global key grabbing is unreliable).
         .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
-            eprintln!("[vtdl] second instance argv: {argv:?}");
+            eprintln!("[rune] second instance argv: {argv:?}");
             if argv.iter().any(|a| a == "--toggle") {
                 toggle_main_window(app);
             } else {
@@ -848,7 +848,7 @@ pub fn run() {
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
                     eprintln!(
-                        "[vtdl] shortcut event: {:?} state={:?}",
+                        "[rune] shortcut event: {:?} state={:?}",
                         shortcut, event.state()
                     );
                     if event.state() == ShortcutState::Pressed {

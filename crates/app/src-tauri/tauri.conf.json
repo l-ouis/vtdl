@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "vtdl",
+  "productName": "rune",
   "version": "0.1.0",
-  "identifier": "dev.vtdl.app",
+  "identifier": "dev.rune.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "vtdl",
+        "title": "rune",
         "width": 720,
         "height": 600,
         "minWidth": 360,

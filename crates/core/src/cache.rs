@@ -13,7 +13,7 @@ pub struct Cache {
 }
 
 pub fn path() -> Result<PathBuf> {
-    let dirs = ProjectDirs::from("dev", "vtdl", "vtdl")
+    let dirs = ProjectDirs::from("dev", "rune", "rune")
         .ok_or_else(|| anyhow!("cannot resolve data dir"))?;
     Ok(dirs.data_dir().join("state.json"))
 }

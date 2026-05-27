@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Default capabilities for the vtdl window",
-  "windows": ["main", "vtdl"],
+  "description": "Default capabilities for the rune window",
+  "windows": ["main", "rune"],
   "permissions": [
     "core:default",
     "core:window:default",

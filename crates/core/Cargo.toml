@@ -1,5 +1,5 @@
 [package]
-name = "vtdl-core"
+name = "rune-core"
 version.workspace = true
 edition.workspace = true
 

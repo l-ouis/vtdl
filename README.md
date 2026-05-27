@@ -1,4 +1,4 @@
-# vtdl
+# rune
 (yet another) vibed to-do list.
 
 I wanted a simple as possible to-do list that still supports cross-device sync, quick navigation, and logical grouping. All logic is done through the text itself.
